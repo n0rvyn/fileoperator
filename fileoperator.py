@@ -38,16 +38,25 @@ _DEL_METHODS_ = [
     f'''find {_TEST_DIR_PREFIX_}5 -type f -delete''',
     f'''find {_HOME_} -maxdepth 1 -type d -name {_TEST_DIR_PREFIX_}6 -exec rm -rf {{}} \;''',
     # find -type d -delete --> only effective to empty directory
-    f'''find {_HOME_} -type d -name {_TEST_DIR_PREFIX_}7 -exec rm -rf {{}} \;'''
+    f'''find {_HOME_} -type d -name {_TEST_DIR_PREFIX_}7 -exec rm -rf {{}} \;''',
+    f"""find {_HOME_} -inum `ls -id {_TEST_DIR_PREFIX_}8 | awk '{{print $1}}'` -exec rm -rf {{}} \;"""
 ]
 
 
 class ProcessConsole(object):
     def __init__(self):
-        pass
+        _py_pid = os.getpid()
+
+        # ONLY fetch PID whose parent PID is '_py_pid'
+        _pgrep = subprocess.getoutput('which pgrep')
+        _pgrep = f"""{_pgrep} -nP {_py_pid}"""
+        _pidof = subprocess.getoutput('which pidof')
+        _pidof = f"""{_pidof} -o {_py_pid}"""
+
+        self._get_pid_command = _pgrep if _pgrep.startswith('/') else _pidof
 
     @staticmethod
-    def get_pid(command: str) -> int:
+    def get_pid_dep(command: str) -> int:
         def _trans_special_ch(_command: str) -> str:
             for ch in ['{', '}', '\\']:
                 _command = _command.replace(ch, f'''\\{ch}''')
@@ -65,13 +74,26 @@ class ProcessConsole(object):
             return 0
         return _pid
 
+    def get_pid(self, command: str) -> int:
+        # _command = command.split()[0]  # get command word from line ($0)
+
+        # todo cover more than 2 PIDs
+        # _command_pid = subprocess.getoutput(f'''{self._get_pid_command} {_command}''')
+        # pgrep -nP P_PID  --> command string is not necessary
+        _command_pid = subprocess.getoutput(self._get_pid_command)
+        try:
+            _command_pid = int(_command_pid)
+            return _command_pid
+        except ValueError:
+            return 0
+
     @staticmethod
     def pid_cpu_mem_usage(pid: int):
         """
         return: tuple(pid, %cpu, %mem)
         """
-        return tuple(subprocess.getoutput(f'''ps -eo pid,pcpu,pmem | grep -w "{pid}"''').split()) if 0 != pid else (
-        0, 0, 0)
+        return tuple(subprocess.getoutput(
+            f'''ps -eo pid,pcpu,pmem | grep -w "{pid}"''').split()) if 0 != pid else (0, 0, 0)
 
     def cal_backend_command_lifetime_usage(self, command: str):
         def _target(_command):
@@ -119,7 +141,7 @@ class ProcessConsole(object):
         # t.join()
         _lifetime = time.perf_counter() - _start_time
 
-        _return = f"""PID: {str(_pid): >5s}| MAX CPU/MEM: {_max_cpu:6.2f}/{_max_mem:5.2f}| AVG CPU/MEM: {_avg_cpu:6.2f}/{_avg_mem:5.2f}| TOTAL CPU/MEM: {_all_cpu:7.2f}/{_all_mem:5.2f}|TIME: {_lifetime:7.2f}"""
+        _return = f"""PID: {str(_pid): >5s}|MAX CPU/MEM: {_max_cpu:6.2f}/{_max_mem:5.2f}|AVG CPU/MEM: {_avg_cpu:6.2f}/{_avg_mem:5.2f}|TOTAL CPU/MEM: {_all_cpu:7.2f}/{_all_mem:5.2f}|TIME: {_lifetime:7.2f}"""
         return _return
 
 
@@ -265,7 +287,7 @@ class FileOperator(object):
 
 def del_dir_perf_test(file_size, no_files, target_dirs_prefix=None, no_target_dirs=None, silent=False):
     target_dirs_prefix = _TEST_DIR_PREFIX_ if target_dirs_prefix is None else target_dirs_prefix
-    no_target_dirs = 7 if no_target_dirs is None else no_target_dirs
+    no_target_dirs = 8 if no_target_dirs is None else no_target_dirs
 
     file_op = FileOperator()
     print(f'\nPrepare {no_target_dirs} dirs and each dir contains {no_files} files for testing: ',
@@ -279,7 +301,7 @@ def del_dir_perf_test(file_size, no_files, target_dirs_prefix=None, no_target_di
         os.mkdir(_EMPTY_DIR_PATH_)
     for _del_command in _DEL_METHODS_:
         print('——' * 52)
-        print(_proc_consl.cal_backend_command_lifetime_usage(_del_command), _del_command, sep='| ')
+        print(_proc_consl.cal_backend_command_lifetime_usage(_del_command), _del_command, sep='|')
     print('——' * 52)
 
     print('\nEnd of test, check directories state after deleting by command "du -sh test*".')
@@ -356,7 +378,7 @@ if __name__ == '__main__':
                 parameters.index('--test-remove-dirs')  # command line contains '--test-remove-dirs'
                 test_remove_dirs = True
                 create_dirs_only = False
-                __no_dirs = 7
+                __no_dirs = 8  # increase the number after add command line to _DELETE_METHODS_
 
                 del_dir_perf_test(__file_size, __no_files, silent=__silent)
             except ValueError:
